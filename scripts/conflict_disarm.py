@@ -79,6 +79,7 @@ class ApplyResult:
     commented: bool = False
     drafted: bool = False
     skipped: bool = False
+    failed: bool = False
 
 
 def _default_runner(cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -124,7 +125,11 @@ def decide(view: PullRequestView) -> Action:
     if _is_unknown(view):
         return Action.RETRY_LATER
     if _label_present(view.labels) and view.mergeable == "MERGEABLE":
-        if view.head_sha and view.head_sha != view.last_marker_comment_sha:
+        if (
+            view.head_sha
+            and view.last_marker_comment_sha
+            and view.head_sha != view.last_marker_comment_sha
+        ):
             return Action.CLEAR_LABEL
         return Action.NOOP
     if _is_conflicting(view):
@@ -212,6 +217,16 @@ def _post_comment(
     return proc.returncode == 0
 
 
+def _first_success(
+    operation: Callable[[str], bool], tokens: Sequence[str]
+) -> tuple[bool, str]:
+    """Try scoped credentials in order without exposing their values."""
+    for token in tokens:
+        if operation(token):
+            return True, token
+    return False, ""
+
+
 def apply_action(
     repo: str,
     view: PullRequestView,
@@ -231,26 +246,39 @@ def apply_action(
     if dry_run:
         return ApplyResult(action, dry_run=True)
 
-    write_token = app_token or github_token
+    tokens = list(dict.fromkeys(token for token in (app_token, github_token) if token))
     revoked = False
     attempts = 0
     drafted = False
 
     if action == Action.DISARM:
         if view.auto_merge_armed:
-            tokens = [t for t in (app_token, github_token) if t]
             for token in tokens:
                 attempts += 1
                 if _disable_auto_merge(run, repo, view.number, token):
                     revoked = True
+                    tokens = tokens[tokens.index(token) :]
                     break
             if not revoked and tokens:
                 drafted = _convert_to_draft(run, repo, view.number, tokens[-1])
-        labeled = _add_label(run, repo, view.number, write_token)
+                if drafted:
+                    tokens = tokens[-1:]
+        safe_state = not view.auto_merge_armed or revoked or drafted
+        labeled = _label_present(view.labels)
+        if not labeled:
+            labeled, label_token = _first_success(
+                lambda token: _add_label(run, repo, view.number, token), tokens
+            )
+            if labeled:
+                tokens = tokens[tokens.index(label_token) :]
         commented = False
-        if view.head_sha != view.last_marker_comment_sha:
-            commented = _post_comment(
-                run, repo, view.number, write_token, view.head_sha
+        comment_exists = view.head_sha == view.last_marker_comment_sha
+        if safe_state and labeled and not comment_exists:
+            commented, _ = _first_success(
+                lambda token: _post_comment(
+                    run, repo, view.number, token, view.head_sha
+                ),
+                tokens,
             )
         return ApplyResult(
             action,
@@ -260,11 +288,14 @@ def apply_action(
             labeled=labeled,
             commented=commented,
             drafted=drafted,
+            failed=not (safe_state and labeled and (comment_exists or commented)),
         )
 
     if action == Action.CLEAR_LABEL:
-        cleared = _remove_label(run, repo, view.number, write_token)
-        return ApplyResult(action, dry_run=False, cleared=cleared)
+        cleared, _ = _first_success(
+            lambda token: _remove_label(run, repo, view.number, token), tokens
+        )
+        return ApplyResult(action, dry_run=False, cleared=cleared, failed=not cleared)
 
     return ApplyResult(action, dry_run=False, skipped=True)  # type: ignore[unreachable]
 
@@ -353,6 +384,9 @@ def _fetch_open_pulls(runner: CommandRunner, repo: str) -> list[dict[str, Any]]:
             "api",
             f"repos/{repo}/pulls?state=open&per_page=100",
             "--paginate",
+            "--slurp",
+            "--jq",
+            "add",
         ],
     )
     if not isinstance(raw, list):
@@ -362,22 +396,27 @@ def _fetch_open_pulls(runner: CommandRunner, repo: str) -> list[dict[str, Any]]:
 
 def _latest_marker_comment_sha(runner: CommandRunner, repo: str, pr: int) -> str:
     try:
-        proc = runner(
+        comments = _gh_json(
+            runner,
             [
-                "gh",
                 "api",
                 f"repos/{repo}/issues/{pr}/comments?per_page=100",
                 "--paginate",
+                "--slurp",
                 "--jq",
-                f'.[] | select(.body | contains("{COMMENT_MARKER}")) | .body',
-            ]
+                f'add | map(select(.body | contains("{COMMENT_MARKER}")))',
+            ],
         )
-    except OSError:
+    except (OSError, RuntimeError, json.JSONDecodeError):
         return ""
-    if proc.returncode != 0:
+    if not isinstance(comments, list) or not comments:
         return ""
-    matches = _MARKER_SHA_RE.findall(proc.stdout)
-    return matches[-1] if matches else ""
+    for comment in reversed(comments):
+        if isinstance(comment, dict):
+            matches = _MARKER_SHA_RE.findall(comment.get("body") or "")
+            if matches:
+                return matches[-1]
+    return ""
 
 
 @dataclass
@@ -435,9 +474,12 @@ def sweep(
                 github_token=github_token,
                 dry_run=dry_run,
             )
-            if action == Action.DISARM and (
-                result.revoked or result.labeled or dry_run
-            ):
+            if result.failed:
+                logger.error(
+                    "conflict_disarm: incomplete %s for %s#%s", action, repo, number
+                )
+                summary.errors += 1
+            elif action == Action.DISARM:
                 summary.disarmed += 1
             elif action == Action.CLEAR_LABEL and (result.cleared or dry_run):
                 summary.cleared += 1
