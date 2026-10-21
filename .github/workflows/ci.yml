@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v5
+        with:
+          python-version: "3.11"
+      - name: Install test tools
+        run: python -m pip install -r requirements-dev.txt
+      - name: Lint and format checks
+        run: |
+          python -m ruff check .
+          python -m ruff format --check .
+      - name: Run decision and workflow contracts
+        run: python -m pytest -q
+
+  dry-run-smoke:
+    if: >-
+      !github.event.pull_request ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: ./.github/workflows/reusable-conflict-disarm.yml
+    with:
+      dry_run: ${{ 'true' }}
+      repo_name: ${{ github.repository }}
+      runner: ubuntu-latest
+
+  quality-gate:
+    if: always()
+    needs: [test, dry-run-smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require tests and a successful dry-run smoke
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          SMOKE_RESULT: ${{ needs.dry-run-smoke.result }}
+          FORK_PR: ${{ github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          set -euo pipefail
+          test "$TEST_RESULT" = success
+          if [ "$FORK_PR" = true ]; then
+            test "$SMOKE_RESULT" = skipped
+          else
+            test "$SMOKE_RESULT" = success
+          fi
