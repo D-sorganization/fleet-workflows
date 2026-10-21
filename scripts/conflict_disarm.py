@@ -377,35 +377,31 @@ def _gh_json(runner: CommandRunner, args: Sequence[str]) -> Any:
     return json.loads(proc.stdout or "null")
 
 
-def _fetch_open_pulls(runner: CommandRunner, repo: str) -> list[dict[str, Any]]:
-    raw = _gh_json(
+def _gh_paginated(runner: CommandRunner, endpoint: str) -> list[dict[str, Any]]:
+    """Decode gh's slurped page arrays; formatting flags cannot accompany slurp."""
+    pages = _gh_json(
         runner,
-        [
-            "api",
-            f"repos/{repo}/pulls?state=open&per_page=100",
-            "--paginate",
-            "--slurp",
-            "--jq",
-            "add",
-        ],
+        ["api", endpoint, "--paginate", "--slurp"],
     )
-    if not isinstance(raw, list):
+    if not isinstance(pages, list):
         return []
-    return [item for item in raw if isinstance(item, dict)]
+    return [
+        item
+        for page in pages
+        if isinstance(page, list)
+        for item in page
+        if isinstance(item, dict)
+    ]
+
+
+def _fetch_open_pulls(runner: CommandRunner, repo: str) -> list[dict[str, Any]]:
+    return _gh_paginated(runner, f"repos/{repo}/pulls?state=open&per_page=100")
 
 
 def _latest_marker_comment_sha(runner: CommandRunner, repo: str, pr: int) -> str:
     try:
-        comments = _gh_json(
-            runner,
-            [
-                "api",
-                f"repos/{repo}/issues/{pr}/comments?per_page=100",
-                "--paginate",
-                "--slurp",
-                "--jq",
-                f'add | map(select(.body | contains("{COMMENT_MARKER}")))',
-            ],
+        comments = _gh_paginated(
+            runner, f"repos/{repo}/issues/{pr}/comments?per_page=100"
         )
     except (OSError, RuntimeError, json.JSONDecodeError):
         return ""
