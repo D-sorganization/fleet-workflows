@@ -1,0 +1,108 @@
+name: Reusable Conflict Disarm
+
+on:
+  workflow_call:
+    inputs:
+      dry_run:
+        description: Log decisions without mutating pull requests
+        type: string
+        default: "true"
+      exclude_prs:
+        description: Comma-separated PR numbers to leave untouched
+        type: string
+        default: ""
+      repo_name:
+        description: Target owner/name; defaults to the caller repository
+        type: string
+        default: ""
+      runner:
+        description: Runner label; hosted public CI may use ubuntu-latest
+        type: string
+        default: d-sorg-fleet
+    secrets:
+      JULES_APP_ID:
+        required: false
+      JULES_APP_PRIVATE_KEY:
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: conflict-disarm-sweep-${{ inputs.repo_name || github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  conflict-disarm:
+    if: >-
+      !github.event.pull_request ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 15
+    env:
+      HAS_APP_CREDENTIALS: ${{ secrets.JULES_APP_ID != '' && secrets.JULES_APP_PRIVATE_KEY != '' }}
+      SUMMARY_NAME: conflict-disarm-${{ github.run_id }}-${{ github.run_attempt }}.json
+    steps:
+      - name: Checkout the implementation paired with this workflow
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .fleet-tools
+          persist-credentials: false
+
+      - name: Mint optional caller-scoped App token
+        if: env.HAS_APP_CREDENTIALS == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        continue-on-error: true
+        with:
+          app-id: ${{ secrets.JULES_APP_ID }}
+          private-key: ${{ secrets.JULES_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Run conflict disarm sweep
+        id: sweep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONFLICT_DISARM_APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO_SLUG: ${{ inputs.repo_name || github.repository }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          EXCLUDE_PRS: ${{ inputs.exclude_prs }}
+        run: |
+          set -euo pipefail
+          flags=(--dry-run)
+          if [ "$DRY_RUN_INPUT" = "false" ]; then
+            flags=()
+          elif [ "$DRY_RUN_INPUT" != "true" ]; then
+            echo '::error::dry_run must be true or false'
+            exit 1
+          fi
+          python .fleet-tools/scripts/conflict_disarm.py \
+            --repo "$REPO_SLUG" --exclude-prs "$EXCLUDE_PRS" \
+            "${flags[@]}" | tee "$RUNNER_TEMP/$SUMMARY_NAME"
+
+      - name: Summarize decisions
+        if: always()
+        env:
+          REPO_SLUG: ${{ inputs.repo_name || github.repository }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          EXCLUDE_PRS: ${{ inputs.exclude_prs }}
+        run: |
+          set -euo pipefail
+          {
+            printf '## Conflict Disarm\n\n'
+            printf 'Repository: `%s`\n\n' "$REPO_SLUG"
+            printf 'Dry run: `%s`\n\n' "$DRY_RUN_INPUT"
+            printf 'Excluded PRs: `%s`\n\n' "$EXCLUDE_PRS"
+            if [ -f "$RUNNER_TEMP/$SUMMARY_NAME" ]; then
+              cat "$RUNNER_TEMP/$SUMMARY_NAME"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
