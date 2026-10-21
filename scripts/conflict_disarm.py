@@ -376,10 +376,8 @@ def _latest_marker_comment_sha(runner: CommandRunner, repo: str, pr: int) -> str
         return ""
     if proc.returncode != 0:
         return ""
-    bodies = [line for line in proc.stdout.splitlines() if line.strip()]
-    if not bodies:
-        return ""
-    return parse_marker_sha(bodies[-1])
+    matches = _MARKER_SHA_RE.findall(proc.stdout)
+    return matches[-1] if matches else ""
 
 
 @dataclass
