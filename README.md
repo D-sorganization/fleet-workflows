@@ -60,7 +60,9 @@ write-scoped smoke job. `quality-gate` verifies both results.
 The implementation and decision tests originated in Repository_Management
 (`scripts/conflict_disarm.py`, `tests/test_conflict_disarm.py`), licensed MIT.
 The workflow preserves its dry-run contract, credential fallback, exclusion
-inputs, and the later concurrency namespace fix. See
+inputs, and the later concurrency namespace fix. Runtime regressions also cover
+multiline marker idempotence, pagination, effective fallback credentials, and
+nonzero reporting when required disarm mutations fail. See
 [the migration record](docs/migration.md) for source revision and validation.
 
 The first `v1` tag must point to the reviewed, merged implementation. Never tag a
