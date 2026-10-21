@@ -17,8 +17,7 @@ one page, credential fallback for labeling/commenting, and false success when
 the required mutations fail. Missing marker evidence now retains the hold, and
 an incomplete disarm returns a nonzero status instead of reporting success.
 The concurrent Cursor marker fix `d77a3cd` was preserved during integration.
-The new
-workflow removes the private RM checkout, pins its implementation checkout to
+The new workflow removes the private RM checkout, pins its implementation checkout to
 the defining workflow revision, and passes credentials through environment
 variables instead of process arguments. Inputs enter shell scripts through
 quoted environment variables. Dry-run rejects invalid values before the sweep.
@@ -29,8 +28,11 @@ Before adding either workflow, the five new migration-contract tests failed
 with missing workflow files. After adding the implementation and workflows,
 `python -m pytest -q` passed all 20 initial tests. Independent review then added
 seven failing runtime regressions before the corrective implementation. The
-final suite passes all 28 tests, including parameterized failure cases. Ruff
-lint and format checks passed.
+final suite passes all 30 tests, including parameterized failure cases and
+realistic nested GitHub CLI pagination responses. A real CLI dry-run exposed
+the incompatible `--slurp` / `--jq` combination; the shared pagination reader
+now flattens pages in Python. The corrected local provider dry-run completed
+with zero errors and no mutations. Ruff lint and format checks passed.
 
 Local actionlint 1.7.12 validates the workflows with only its two unsupported
 `job.workflow_repository` / `job.workflow_sha` property diagnostics excluded.
