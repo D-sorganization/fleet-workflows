@@ -40,7 +40,16 @@ def test_job_skips_drafts_forks_and_non_pull_request_events() -> None:
     assert "github.event_name == 'pull_request'" in condition
     assert "github.event.pull_request.draft == false" in condition
     assert "head.repo.full_name == github.repository" in condition
-    assert _job()["timeout-minutes"] <= 5
+
+
+def test_job_timeout_is_caller_tunable_with_a_short_default() -> None:
+    """Fleet workflow lint requires callers to state timeout-minutes; a
+    `uses:` job cannot set it, so the reusable workflow accepts it."""
+    events = _workflow().get("on") or _workflow()[True]
+    timeout = events["workflow_call"]["inputs"]["timeout-minutes"]
+    assert timeout["type"] == "number"
+    assert 0 < timeout["default"] <= 5
+    assert _job()["timeout-minutes"] == "${{ inputs.timeout-minutes }}"
 
 
 def test_checks_out_its_own_immutable_revision_without_credentials() -> None:
