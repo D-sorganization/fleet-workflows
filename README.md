@@ -99,9 +99,20 @@ permissions:
   contents: read
   issues: read
   pull-requests: read
+# Distinct from the reusable workflow's own group, so the two never deadlock.
+concurrency:
+  group: codex-review-caller-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
   request:
-    uses: D-sorganization/fleet-workflows/.github/workflows/reusable-codex-review-request.yml@main
+    # Fork guard stated in the caller for fleet runner-routing checks.
+    if: >-
+      (!github.event.pull_request ||
+      github.event.pull_request.head.repo.full_name == github.repository) &&
+      !github.event.pull_request.draft
+    uses: D-sorganization/fleet-workflows/.github/workflows/reusable-codex-review-request.yml@<sha> # main
+    with:
+      timeout-minutes: 5
     secrets:
       CODEX_REVIEW_REQUEST_TOKEN: ${{ secrets.CODEX_REVIEW_REQUEST_TOKEN }}
 ```

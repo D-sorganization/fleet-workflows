@@ -57,6 +57,7 @@ jobs:
       pull-requests: read
     uses: ./.github/workflows/reusable-codex-review-request.yml
     with:
+      timeout-minutes: 5
       runner: ubuntu-latest
 
   quality-gate:
