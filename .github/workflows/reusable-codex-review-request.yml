@@ -1,0 +1,69 @@
+name: Reusable Codex Review Request
+
+# Posts `@codex review` once per pull request when it is ready for review and
+# either security-sensitive or larger than `threshold` changed lines. Callers
+# trigger on pull_request opened / ready_for_review / labeled, never on
+# synchronize, so pushes do not re-request. Codex ignores bot-authored
+# requests, so the comment is posted with CODEX_REVIEW_REQUEST_TOKEN, which
+# must belong to a Codex-linked human account. Without it the run only records
+# its decision.
+
+on:
+  workflow_call:
+    inputs:
+      threshold:
+        description: Changed-line count above which a PR counts as large
+        type: number
+        default: 200
+      runner:
+        description: Runner label; hosted public CI may use ubuntu-latest
+        type: string
+        default: d-sorg-fleet
+    secrets:
+      CODEX_REVIEW_REQUEST_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: codex-review-request-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  request:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the implementation paired with this workflow
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .fleet-tools
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Decide and request at most one Codex review
+        id: request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEX_REVIEW_REQUEST_TOKEN: ${{ secrets.CODEX_REVIEW_REQUEST_TOKEN }}
+          REPO_SLUG: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          THRESHOLD: ${{ inputs.threshold }}
+        run: |
+          set -euo pipefail
+          python .fleet-tools/scripts/codex_review_request.py \
+            --repo "$REPO_SLUG" --pr "$PR_NUMBER" --threshold "$THRESHOLD" \
+            | tee -a "$GITHUB_STEP_SUMMARY"

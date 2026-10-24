@@ -77,7 +77,7 @@ def test_ci_checks_prs_and_merge_groups_and_exercises_reusable_in_dry_run() -> N
     assert smoke["with"]["repo_name"] == "${{ github.repository }}"
     assert smoke["with"]["runner"] == "ubuntu-latest"
     assert document["jobs"]["quality-gate"]["if"] == "always()"
-    assert set(document["jobs"]["quality-gate"]["needs"]) == {"test", "dry-run-smoke"}
+    assert {"test", "dry-run-smoke"} <= set(document["jobs"]["quality-gate"]["needs"])
 
 
 def test_external_actions_are_sha_pinned() -> None:

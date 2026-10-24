@@ -47,9 +47,21 @@ jobs:
       repo_name: ${{ github.repository }}
       runner: ubuntu-latest
 
+  codex-request-smoke:
+    if: >-
+      !github.event.pull_request ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    uses: ./.github/workflows/reusable-codex-review-request.yml
+    with:
+      runner: ubuntu-latest
+
   quality-gate:
     if: always()
-    needs: [test, dry-run-smoke]
+    needs: [test, dry-run-smoke, codex-request-smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -57,6 +69,7 @@ jobs:
         env:
           TEST_RESULT: ${{ needs.test.result }}
           SMOKE_RESULT: ${{ needs.dry-run-smoke.result }}
+          CODEX_SMOKE_RESULT: ${{ needs.codex-request-smoke.result }}
           FORK_PR: ${{ github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           set -euo pipefail
@@ -66,3 +79,4 @@ jobs:
           else
             test "$SMOKE_RESULT" = success
           fi
+          case "$CODEX_SMOKE_RESULT" in success|skipped) ;; *) exit 1 ;; esac
