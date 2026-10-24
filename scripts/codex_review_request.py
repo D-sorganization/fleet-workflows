@@ -37,7 +37,7 @@ _TRIGGER = re.compile(r"^\s*@codex\s+review\b", re.IGNORECASE)
 _SENSITIVE_PATH = re.compile(
     r"(^|/)\.github/(workflows|actions)/|(^|/)CODEOWNERS$"
     r"|(^|[/_.-])(auth|security|secrets?|credentials?|tokens?|guards?|holds?"
-    r"|permissions?)",
+    r"|permissions?)(?=[/_.-]|$)",
     re.IGNORECASE,
 )
 _SENSITIVE_LABELS = frozenset(
