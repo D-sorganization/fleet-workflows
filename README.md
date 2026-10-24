@@ -68,3 +68,42 @@ nonzero reporting when required disarm mutations fail. See
 The first `v1` tag must point to the reviewed, merged implementation. Never tag a
 PR branch or move the release to unreviewed code. RD, Tools, and AD switch callers
 only after that tag exists; workflow re-enablement follows merged caller PRs.
+
+## Codex Review Request
+
+`reusable-codex-review-request.yml` posts `@codex review` **once per pull
+request**, for fleet repositories that run Codex review request-only. It posts
+only when the PR is open and not a draft, and is not a bot-authored
+deletion-only PR. There must also be no earlier `@codex review` request or
+Codex review on it. And the PR must either touch a security-sensitive path or
+label (`.github/workflows`, `.github/actions`, `CODEOWNERS`, auth, security,
+secrets, tokens, guards, holds, permissions, or `ci`/`security`/`hold` labels)
+or change more than `threshold` lines (default 200). The decision logic lives in
+`scripts/codex_review_request.py` and is tested in
+`tests/test_codex_review_request.py`.
+
+Codex ignores `@codex review` posted by bot accounts. It replies "create a
+Codex account and connect to github". See Repository_Management#2329 and
+Runner_Dashboard#2196: `codex-scheduled-tasks[bot]` was refused on
+2026-10-22, and the same request from the owner ran. So the comment is posted
+with the optional `CODEX_REVIEW_REQUEST_TOKEN` secret, which must belong to a
+Codex-linked human account. Without that secret, runs record the decision in
+the step summary and post nothing. `GITHUB_TOKEN` stays read-only.
+
+```yaml
+name: Codex Review Request
+on:
+  pull_request:
+    types: [opened, ready_for_review, labeled]
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+jobs:
+  request:
+    uses: D-sorganization/fleet-workflows/.github/workflows/reusable-codex-review-request.yml@main
+    secrets:
+      CODEX_REVIEW_REQUEST_TOKEN: ${{ secrets.CODEX_REVIEW_REQUEST_TOKEN }}
+```
+
+Callers never trigger on `synchronize`, so new pushes do not re-request.
