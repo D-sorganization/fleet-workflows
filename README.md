@@ -33,8 +33,10 @@ jobs:
 ```
 
 App credentials are optional; omit the `secrets` block to use the caller's
-`GITHUB_TOKEN`. No credentials are stored in the checkout or passed as command
-arguments. The default runner is `d-sorg-fleet`; public CI can explicitly select
+`GITHUB_TOKEN`. A minted App token is scoped to the swept repository only, with
+`contents`, `pull-requests` and `issues` write (dequeue and disabling auto-merge
+need `contents: write`). No credentials are stored in the checkout or passed as
+command arguments. The default runner is `d-sorg-fleet`; public CI can explicitly select
 `runner: ubuntu-latest`. Keep dry-run enabled until the owner approves live sweeps.
 Keep the caller's concurrency group distinct from `conflict-disarm-sweep-*`.
 

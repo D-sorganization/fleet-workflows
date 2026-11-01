@@ -52,6 +52,24 @@ jobs:
           path: .fleet-tools
           persist-credentials: false
 
+      # github.event.repository is absent on schedule events; derive the scope
+      # from the swept repository so the token never widens to the installation.
+      - name: Resolve App token scope
+        if: env.HAS_APP_CREDENTIALS == 'true'
+        id: token-scope
+        env:
+          REPO_SLUG: ${{ inputs.repo_name || github.repository }}
+        run: |
+          set -euo pipefail
+          owner="${REPO_SLUG%%/*}"
+          repo="${REPO_SLUG#*/}"
+          if [ -z "$owner" ] || [ -z "$repo" ] || [ "$repo" = "$REPO_SLUG" ]; then
+            echo '::error::repo_name must be owner/name'
+            exit 1
+          fi
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+
       - name: Mint optional caller-scoped App token
         if: env.HAS_APP_CREDENTIALS == 'true'
         id: app-token
@@ -60,8 +78,13 @@ jobs:
         with:
           app-id: ${{ secrets.JULES_APP_ID }}
           private-key: ${{ secrets.JULES_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
+          owner: ${{ steps.token-scope.outputs.owner }}
+          repositories: ${{ steps.token-scope.outputs.repo }}
+          # Only what the sweep uses: contents for dequeue and disabling
+          # auto-merge, pull-requests for comments, issues for the label.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v5
