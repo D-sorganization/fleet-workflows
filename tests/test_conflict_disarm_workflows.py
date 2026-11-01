@@ -88,3 +88,60 @@ def test_external_actions_are_sha_pinned() -> None:
             for step in job.get("steps", []):
                 if "uses" in step:
                     assert re.fullmatch(r"[^@]+@[0-9a-f]{40}", step["uses"])
+
+
+def _app_token_step() -> dict[str, Any]:
+    steps = workflow("reusable-conflict-disarm.yml")["jobs"]["conflict-disarm"]["steps"]
+    return next(step for step in steps if step.get("id") == "app-token")
+
+
+def test_app_token_is_scoped_to_the_target_repository_on_every_event() -> None:
+    # github.event.repository is absent on schedule events, which left
+    # `repositories:` empty and minted an installation-wide token.
+    document = workflow("reusable-conflict-disarm.yml")
+    assert "github.event.repository" not in str(document)
+    token = _app_token_step()["with"]
+    assert token["owner"] == "${{ steps.token-scope.outputs.owner }}"
+    assert token["repositories"] == "${{ steps.token-scope.outputs.repo }}"
+    steps = document["jobs"]["conflict-disarm"]["steps"]
+    scope = next(step for step in steps if step.get("id") == "token-scope")
+    assert scope["env"]["REPO_SLUG"] == "${{ inputs.repo_name || github.repository }}"
+    assert "${{" not in scope["run"]
+
+
+def test_app_token_requests_only_the_permissions_the_sweep_uses() -> None:
+    # contents: write is required for dequeue and disabling auto-merge;
+    # issues: write covers the conflict:disarmed label.
+    token = _app_token_step()["with"]
+    requested = {k: v for k, v in token.items() if k.startswith("permission-")}
+    assert requested == {
+        "permission-contents": "write",
+        "permission-pull-requests": "write",
+        "permission-issues": "write",
+    }
+
+
+def test_token_scope_step_resolves_the_caller_on_a_schedule_event(
+    tmp_path: Path,
+) -> None:
+    # A schedule payload has no `repository` object; github.repository (the
+    # caller's owner/name) is still set, and the step must derive both parts.
+    import os
+    import subprocess
+
+    steps = workflow("reusable-conflict-disarm.yml")["jobs"]["conflict-disarm"]["steps"]
+    scope = next(step for step in steps if step.get("id") == "token-scope")
+    output = tmp_path / "github_output"
+    env = {
+        **os.environ,
+        "REPO_SLUG": "D-sorganization/UpstreamDrift",
+        "GITHUB_OUTPUT": str(output),
+    }
+    subprocess.run(["bash", "-c", scope["run"]], env=env, check=True)
+    assert output.read_text().splitlines() == [
+        "owner=D-sorganization",
+        "repo=UpstreamDrift",
+    ]
+    env["REPO_SLUG"] = "UpstreamDrift"
+    refused = subprocess.run(["bash", "-c", scope["run"]], env=env, check=False)
+    assert refused.returncode != 0
