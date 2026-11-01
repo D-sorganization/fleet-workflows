@@ -81,7 +81,8 @@ jobs:
           owner: ${{ steps.token-scope.outputs.owner }}
           repositories: ${{ steps.token-scope.outputs.repo }}
           # Only what the sweep uses: contents for dequeue and disabling
-          # auto-merge, pull-requests for comments, issues for the label.
+          # auto-merge, pull-requests for PR state, issues for the label and
+          # the PR comment (both go through the issues API).
           permission-contents: write
           permission-pull-requests: write
           permission-issues: write

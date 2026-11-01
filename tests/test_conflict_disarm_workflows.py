@@ -119,3 +119,29 @@ def test_app_token_requests_only_the_permissions_the_sweep_uses() -> None:
         "permission-pull-requests": "write",
         "permission-issues": "write",
     }
+
+
+def test_token_scope_step_resolves_the_caller_on_a_schedule_event(
+    tmp_path: Path,
+) -> None:
+    # A schedule payload has no `repository` object; github.repository (the
+    # caller's owner/name) is still set, and the step must derive both parts.
+    import os
+    import subprocess
+
+    steps = workflow("reusable-conflict-disarm.yml")["jobs"]["conflict-disarm"]["steps"]
+    scope = next(step for step in steps if step.get("id") == "token-scope")
+    output = tmp_path / "github_output"
+    env = {
+        **os.environ,
+        "REPO_SLUG": "D-sorganization/UpstreamDrift",
+        "GITHUB_OUTPUT": str(output),
+    }
+    subprocess.run(["bash", "-c", scope["run"]], env=env, check=True)
+    assert output.read_text().splitlines() == [
+        "owner=D-sorganization",
+        "repo=UpstreamDrift",
+    ]
+    env["REPO_SLUG"] = "UpstreamDrift"
+    refused = subprocess.run(["bash", "-c", scope["run"]], env=env, check=False)
+    assert refused.returncode != 0
