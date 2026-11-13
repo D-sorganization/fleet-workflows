@@ -136,9 +136,9 @@ def _fake_gh(pr: dict[str, Any], files: list[Any], comments: list[Any]) -> Any:
         if cmd[1] == "api" and "--method" in cmd:
             return _completed(0, {"id": 1})
         if endpoint.endswith("/files?per_page=100"):
-            return _completed(0, [files])
+            return _completed(0, files)
         if endpoint.endswith("/comments?per_page=100"):
-            return _completed(0, [comments])
+            return _completed(0, comments)
         return _completed(0, pr)
 
     return run, calls
@@ -189,9 +189,9 @@ def test_failed_post_raises() -> None:
         if "--method" in cmd:
             return _completed(1, err="denied")
         if cmd[2].endswith("/files?per_page=100"):
-            return _completed(0, [[{"filename": "CODEOWNERS"}]])
+            return _completed(0, [{"filename": "CODEOWNERS"}])
         if cmd[2].endswith("/comments?per_page=100"):
-            return _completed(0, [[]])
+            return _completed(0, [])
         return _completed(0, {**_PR, "user": {"login": "u", "type": "User"}})
 
     with pytest.raises(RuntimeError, match="denied"):
