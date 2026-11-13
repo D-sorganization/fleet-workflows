@@ -31,7 +31,9 @@ seven failing runtime regressions before the corrective implementation. The
 final suite passes all 30 tests, including parameterized failure cases and
 realistic nested GitHub CLI pagination responses. A real CLI dry-run exposed
 the incompatible `--slurp` / `--jq` combination; the shared pagination reader
-now flattens pages in Python. The corrected local provider dry-run completed
+(`scripts/gh_pagination.py`) now flattens pages in Python. It calls
+`gh api --paginate` with neither flag, because `--slurp` needs gh 2.48 and
+older runner hosts reject it, and decodes the concatenated page documents. The corrected local provider dry-run completed
 with zero errors and no mutations. Ruff lint and format checks passed.
 
 Local actionlint 1.7.12 validates the workflows with only its two unsupported

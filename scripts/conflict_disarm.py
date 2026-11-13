@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from gh_pagination import PAGINATE_FLAGS, decode_paginated_items
+
 logger = logging.getLogger(__name__)
 
 CONFLICT_DISARMED_LABEL = "conflict:disarmed"
@@ -378,20 +380,11 @@ def _gh_json(runner: CommandRunner, args: Sequence[str]) -> Any:
 
 
 def _gh_paginated(runner: CommandRunner, endpoint: str) -> list[dict[str, Any]]:
-    """Decode gh's slurped page arrays; formatting flags cannot accompany slurp."""
-    pages = _gh_json(
-        runner,
-        ["api", endpoint, "--paginate", "--slurp"],
-    )
-    if not isinstance(pages, list):
-        return []
-    return [
-        item
-        for page in pages
-        if isinstance(page, list)
-        for item in page
-        if isinstance(item, dict)
-    ]
+    """Read every page of a list endpoint without ``--slurp`` (needs gh 2.48)."""
+    proc = runner(["gh", "api", endpoint, *PAGINATE_FLAGS])
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "gh failed")
+    return decode_paginated_items(proc.stdout or "")
 
 
 def _fetch_open_pulls(runner: CommandRunner, repo: str) -> list[dict[str, Any]]:

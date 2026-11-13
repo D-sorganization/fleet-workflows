@@ -11,6 +11,11 @@ import pytest
 from test_conflict_disarm import _completed, _pr, conflict_disarm
 
 
+def _concatenated(pages: Sequence[Any]) -> str:
+    """Render pages as ``gh api --paginate`` prints them: one document per page."""
+    return "\n".join(json.dumps(page) for page in pages)
+
+
 def test_multiline_marker_lookup_preserves_latest_body_and_same_head_hold() -> None:
     old_sha, current_sha = "a" * 40, "b" * 40
     bodies = [
@@ -20,14 +25,11 @@ def test_multiline_marker_lookup_preserves_latest_body_and_same_head_hold() -> N
     ]
 
     def run(cmd: Sequence[str]) -> Any:
-        assert "--slurp" in cmd
+        assert "--paginate" in cmd
+        assert "--slurp" not in cmd
         assert "--jq" not in cmd and "--template" not in cmd
-        return _completed(
-            0,
-            json.dumps(
-                [[{"body": bodies[0]}], [{"body": body} for body in bodies[1:]]]
-            ),
-        )
+        pages = [[{"body": bodies[0]}], [{"body": body} for body in bodies[1:]]]
+        return _completed(0, _concatenated(pages))
 
     marker = conflict_disarm._latest_marker_comment_sha(run, "o/r", 1)
     assert marker == current_sha
@@ -47,9 +49,9 @@ def test_open_pull_fetch_flattens_all_cli_pages() -> None:
 
     def run(cmd: Sequence[str]) -> Any:
         assert "--paginate" in cmd
-        assert "--slurp" in cmd
+        assert "--slurp" not in cmd
         assert "--jq" not in cmd and "--template" not in cmd
-        return _completed(0, json.dumps(pages))
+        return _completed(0, _concatenated(pages))
 
     assert conflict_disarm._fetch_open_pulls(run, "o/r") == [
         {"number": 1},
@@ -60,9 +62,10 @@ def test_open_pull_fetch_flattens_all_cli_pages() -> None:
 @pytest.mark.parametrize("pages", [[], [[]]])
 def test_empty_paginated_pull_response_returns_no_candidates(pages: list[Any]) -> None:
     def run(cmd: Sequence[str]) -> Any:
-        assert "--slurp" in cmd
+        assert "--paginate" in cmd
+        assert "--slurp" not in cmd
         assert "--jq" not in cmd and "--template" not in cmd
-        return _completed(0, json.dumps(pages))
+        return _completed(0, _concatenated(pages))
 
     assert conflict_disarm._fetch_open_pulls(run, "o/r") == []
 
@@ -85,9 +88,9 @@ class MutationRunner:
     def __call__(self, cmd: Sequence[str]) -> Any:
         self.calls.append((list(cmd), os.environ.get("GH_TOKEN", "")))
         if cmd[1] == "api":
-            assert "--slurp" not in cmd or not {"--jq", "--template"}.intersection(cmd)
+            assert not {"--slurp", "--jq", "--template"}.intersection(cmd)
             if "comments?" in cmd[2]:
-                return _completed(0, "[[]]" if "--slurp" in cmd else "")
+                return _completed(0, "[]" if "--paginate" in cmd else "")
             raw = {
                 "number": 1,
                 "state": "open",
@@ -96,7 +99,7 @@ class MutationRunner:
                 "auto_merge": {},
                 "head": {"sha": "b" * 40},
             }
-            return _completed(0, json.dumps([[raw]] if "pulls?" in cmd[2] else raw))
+            return _completed(0, json.dumps([raw] if "pulls?" in cmd[2] else raw))
         if self.deny_revoke and ("--disable-auto" in cmd or "--undo" in cmd):
             return _completed(1, stderr="refused")
         if self.deny_label and "--add-label" in cmd:

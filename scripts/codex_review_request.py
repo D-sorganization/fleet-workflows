@@ -27,6 +27,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from gh_pagination import PAGINATE_FLAGS, decode_paginated_items
+
 REQUEST_MARKER = "<!-- fleet-codex-review-request:v1 -->"
 CODEX_MARKERS = (
     "<!-- codex-review-receipt:v1 -->",
@@ -152,14 +154,11 @@ def _gh_json(run: CommandRunner, token: str, args: Sequence[str]) -> Any:
 
 
 def _gh_items(run: CommandRunner, token: str, endpoint: str) -> list[dict[str, Any]]:
-    pages = _gh_json(run, token, ["api", endpoint, "--paginate", "--slurp"])
-    return [
-        item
-        for page in pages or []
-        if isinstance(page, list)
-        for item in page
-        if isinstance(item, dict)
-    ]
+    """Read every page of a list endpoint without ``--slurp`` (needs gh 2.48)."""
+    proc = run(["gh", "api", endpoint, *PAGINATE_FLAGS], token)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "gh failed")
+    return decode_paginated_items(proc.stdout or "")
 
 
 def fetch_view(run: CommandRunner, repo: str, pr: int, token: str) -> PullRequestView:
